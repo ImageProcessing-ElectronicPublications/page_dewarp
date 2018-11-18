@@ -11,7 +11,6 @@
 
 import os
 import sys
-import argparse
 import datetime
 import cv2
 from PIL import Image
@@ -779,7 +778,7 @@ def get_page_dims(corners, rough_dims, params):
     return dims
 
 
-def remap_image(name, img, small, page_dims, params, fthres, fcolor):
+def remap_image(name, img, small, page_dims, params):
 
     height = 0.5 * page_dims[1] * OUTPUT_ZOOM * img.shape[0]
     height = round_nearest_multiple(height, REMAP_DECIMATE)
@@ -814,43 +813,34 @@ def remap_image(name, img, small, page_dims, params, fthres, fcolor):
     image_y_coords = cv2.resize(image_y_coords, (width, height),
                                 interpolation=cv2.INTER_CUBIC)
 
-    threshfile = name + '_dewarp.png'
-    if (fcolor):
-        print 'Mode: Color'
-        img_r = img[:,:,0]
-        img_g = img[:,:,1]
-        img_b = img[:,:,2]
-        remapped_r = cv2.remap(img_r, image_x_coords, image_y_coords,
-                         cv2.INTER_CUBIC,
-                         None, cv2.BORDER_REPLICATE)
-        remapped_g = cv2.remap(img_g, image_x_coords, image_y_coords,
-                         cv2.INTER_CUBIC,
-                         None, cv2.BORDER_REPLICATE)
-        remapped_b = cv2.remap(img_b, image_x_coords, image_y_coords,
-                         cv2.INTER_CUBIC,
-                         None, cv2.BORDER_REPLICATE)
-        remapped = np.zeros((height, width, 3))
-        remapped[:,:,0] = remapped_r
-        remapped[:,:,1] = remapped_g
-        remapped[:,:,2] = remapped_b
-        cv2.imwrite(threshfile, remapped)
-    else:
-        img_gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    img_r = img[:,:,0]
+    img_g = img[:,:,1]
+    img_b = img[:,:,2]
 
-        remapped = cv2.remap(img_gray, image_x_coords, image_y_coords,
+    remapped_r = cv2.remap(img_r, image_x_coords, image_y_coords,
                          cv2.INTER_CUBIC,
                          None, cv2.BORDER_REPLICATE)
-        if (fthres):
-            print 'Mode: BW'
-            thresh = cv2.adaptiveThreshold(remapped, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
-                                   cv2.THRESH_BINARY, ADAPTIVE_WINSZ, 25)
+    remapped_g = cv2.remap(img_g, image_x_coords, image_y_coords,
+                         cv2.INTER_CUBIC,
+                         None, cv2.BORDER_REPLICATE)
 
-            pil_image = Image.fromarray(thresh)
-            pil_image = pil_image.convert('1')
-        else:
-            print 'Mode: Gray'
-            pil_image = Image.fromarray(remapped)
-        pil_image.save(threshfile, dpi=(OUTPUT_DPI, OUTPUT_DPI))
+    remapped_b = cv2.remap(img_b, image_x_coords, image_y_coords,
+                         cv2.INTER_CUBIC,
+                         None, cv2.BORDER_REPLICATE)
+    remapped = np.zeros((height, width, 3))
+    remapped[:,:,0] = remapped_r
+    remapped[:,:,1] = remapped_g
+    remapped[:,:,2] = remapped_b
+
+#    thresh = cv2.adaptiveThreshold(remapped, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
+#                                   cv2.THRESH_BINARY, ADAPTIVE_WINSZ, 25)
+
+#    pil_image = Image.fromarray(remapped)
+#    pil_image = pil_image.convert('1')
+
+    threshfile = name + '_thresh.png'
+#    pil_image.save(threshfile, dpi=(OUTPUT_DPI, OUTPUT_DPI))
+    cv2.imwrite(threshfile, remapped)
 
     if DEBUG_LEVEL >= 1:
         height = small.shape[0]
@@ -862,71 +852,78 @@ def remap_image(name, img, small, page_dims, params, fthres, fcolor):
     return threshfile
 
 
-def main(imgfile, fthres, fcolor):
+def main():
+
+    if len(sys.argv) < 2:
+        print 'usage:', sys.argv[0], 'IMAGE1 [IMAGE2 ...]'
+        sys.exit(0)
 
     if DEBUG_LEVEL > 0 and DEBUG_OUTPUT != 'file':
         cv2.namedWindow(WINDOW_NAME)
 
     outfiles = []
 
-    img = cv2.imread(imgfile)
-    small = resize_to_screen(img)
-    basename = os.path.basename(imgfile)
-    name, _ = os.path.splitext(basename)
+    for imgfile in sys.argv[1:]:
 
-    print 'loaded', basename, 'with size', imgsize(img),
-    print 'and resized to', imgsize(small)
+        img = cv2.imread(imgfile)
+        small = resize_to_screen(img)
+        basename = os.path.basename(imgfile)
+        name, _ = os.path.splitext(basename)
 
-    if DEBUG_LEVEL >= 3:
-        debug_show(name, 0.0, 'original', small)
+        print 'loaded', basename, 'with size', imgsize(img),
+        print 'and resized to', imgsize(small)
 
-    pagemask, page_outline = get_page_extents(small)
+        if DEBUG_LEVEL >= 3:
+            debug_show(name, 0.0, 'original', small)
 
-    cinfo_list = get_contours(name, small, pagemask, 'text')
-    spans = assemble_spans(name, small, pagemask, cinfo_list)
+        pagemask, page_outline = get_page_extents(small)
 
-    if len(spans) < 3:
-        print '  detecting lines because only', len(spans), 'text spans'
-        cinfo_list = get_contours(name, small, pagemask, 'line')
-        spans2 = assemble_spans(name, small, pagemask, cinfo_list)
-        if len(spans2) > len(spans):
-            spans = spans2
+        cinfo_list = get_contours(name, small, pagemask, 'text')
+        spans = assemble_spans(name, small, pagemask, cinfo_list)
 
-    if len(spans) < 1:
-        print 'skipping', name, 'because only', len(spans), 'spans'
+        if len(spans) < 3:
+            print '  detecting lines because only', len(spans), 'text spans'
+            cinfo_list = get_contours(name, small, pagemask, 'line')
+            spans2 = assemble_spans(name, small, pagemask, cinfo_list)
+            if len(spans2) > len(spans):
+                spans = spans2
 
-    span_points = sample_spans(small.shape, spans)
+        if len(spans) < 1:
+            print 'skipping', name, 'because only', len(spans), 'spans'
+            continue
 
-    print '  got', len(spans), 'spans',
-    print 'with', sum([len(pts) for pts in span_points]), 'points.'
+        span_points = sample_spans(small.shape, spans)
 
-    corners, ycoords, xcoords = keypoints_from_samples(name, small,
-                                                       pagemask,
-                                                       page_outline,
-                                                       span_points)
+        print '  got', len(spans), 'spans',
+        print 'with', sum([len(pts) for pts in span_points]), 'points.'
 
-    rough_dims, span_counts, params = get_default_params(corners,
-                                                         ycoords, xcoords)
+        corners, ycoords, xcoords = keypoints_from_samples(name, small,
+                                                           pagemask,
+                                                           page_outline,
+                                                           span_points)
 
-    dstpoints = np.vstack((corners[0].reshape((1, 1, 2)),) + tuple(span_points))
+        rough_dims, span_counts, params = get_default_params(corners,
+                                                             ycoords, xcoords)
 
-    params = optimize_params(name, small,
-                             dstpoints,
-                             span_counts, params)
+        dstpoints = np.vstack((corners[0].reshape((1, 1, 2)),) +
+                              tuple(span_points))
 
-    page_dims = get_page_dims(corners, rough_dims, params)
+        params = optimize_params(name, small,
+                                 dstpoints,
+                                 span_counts, params)
 
-    outfile = remap_image(name, img, small, page_dims, params, fthres, fcolor)
+        page_dims = get_page_dims(corners, rough_dims, params)
 
-    outfiles.append(outfile)
+        outfile = remap_image(name, img, small, page_dims, params)
 
-    print '  wrote', outfile
-    print
+        outfiles.append(outfile)
+
+        print '  wrote', outfile
+        print
+
+    print 'to convert to PDF (requires ImageMagick):'
+    print '  convert -compress Group4 ' + ' '.join(outfiles) + ' output.pdf'
+
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Page DeWarp")
-    parser.add_argument('-c', '--color', action='store_true', default=False, help='RGB result image')
-    parser.add_argument('-t', '--threshold', action='store_true', default=False, help='Threshold result image')
-    parser.add_argument("imgfile", help="Name dewarp image")
-    args = parser.parse_args()
-    main(args.imgfile, args.threshold, args.color)
+    main()
